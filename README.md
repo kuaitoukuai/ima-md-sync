@@ -142,6 +142,10 @@ ima-md-sync/
 └── README.md
 ```
 
+## 更新日志
+
+见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## License
 
 [MIT](LICENSE)
