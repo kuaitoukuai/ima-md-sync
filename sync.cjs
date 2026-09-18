@@ -217,6 +217,17 @@ async function uploadOne(filePath, fileName, fileSize, kbId, creds) {
   return { ok: true, media_id: (ak && ak.media_id) || mediaId };
 }
 
+// 同名冲突时取远端文件大小（取不到返回 null，视为同一文件跳过）
+async function getRemoteSize(mediaId, creds) {
+  try {
+    const m = await imaApi("openapi/wiki/v1/get_media_info", { media_id: mediaId }, creds);
+    const size = m.file_size ?? m.size ?? (m.file_info && m.file_info.file_size);
+    if (size != null) return Number(size);
+    const match = JSON.stringify(m).match(/"(?:file_size|size)"\s*:\s*(\d+)/i);
+    return match ? Number(match[1]) : null;
+  } catch { return null; }
+}
+
 // ────────────────────────── 主流程 ──────────────────────────
 let state = loadState();
 
@@ -238,16 +249,17 @@ async function main() {
   if (!kbId) throw new Error(`未找到知识库「${CONFIG.kbName}」`);
   state.kbId = kbId;
 
-  // 2. 拉取知识库已有文件名清单（分页全量）
-  const kbNames = new Set();
+  // 2. 拉取知识库已有文件清单（分页全量），记录 名称→media_id 供同名大小比对
+  const kbFiles = new Map(); // title -> media_id
   let cursor = "";
   for (let page = 0; page < 200; page++) {
     const d = await imaApi("openapi/wiki/v1/get_knowledge_list", { knowledge_base_id: kbId, cursor, limit: 50 }, creds);
-    for (const it of (d.knowledge_list || [])) kbNames.add(it.title);
+    for (const it of (d.knowledge_list || [])) kbFiles.set(it.title, it.media_id);
     if (d.is_end) break;
     cursor = d.next_cursor || "";
     if (!cursor) break;
   }
+  const kbNames = new Set(kbFiles.keys());
   log(`## 运行概况`);
   log(`- 运行时间：${fmtDate(now)}${dryRun ? "（dry-run 演练，未上传）" : ""}`);
   log(`- 知识库「${CONFIG.kbName}」现有文件：${kbNames.size} 个`);
@@ -263,16 +275,27 @@ async function main() {
   }
   log(`- 扫描根目录：${scannedRoots} 个；命中目标文档：${out.files.length} 个；冷却跳过目录：${out.cooledDirs} 个；0字节空文件跳过：${out.zeroSize} 个`);
 
-  // 4. 比对：新文件 = 不在知识库 && 未在本机上传统计中
+  // 4. 比对：新文件 = 不在知识库 && 未在本机上传统计中；同名文件要比对大小
   const uploadedMap = state.uploaded || {};
   const pending = [];
   const tooLarge = [];
+  const collisions = [];
   for (const f of out.files) {
-    if (kbNames.has(f.name)) { f.status = "已在知识库"; continue; }
     if (uploadedMap[f.path.toLowerCase()]) { f.status = "本机已上传"; continue; }
     if (f.size > CONFIG.maxFileBytes) { f.status = "超10MB限制"; tooLarge.push(f); continue; }
+    if (kbFiles.has(f.name)) { collisions.push(f); continue; }
     f.status = "待上传";
     pending.push(f);
+  }
+  // 同名比对：远端取不到大小→视为同一文件跳过；大小不同→说明不是同一文件，改名另存上传
+  for (const f of collisions) {
+    const remoteSize = await getRemoteSize(kbFiles.get(f.name), creds);
+    if (remoteSize === null || remoteSize === f.size) { f.status = "已在知识库"; continue; }
+    f.status = "待上传";
+    f.renameOnUpload = true;
+    f.remoteSize = remoteSize;
+    pending.push(f);
+    log(`- 🔄 同名不同大小：${f.name}（本地 ${f.size}B ≠ 远端 ${remoteSize}B）→ 将以时间戳后缀另存上传`);
   }
   out.files.sort((a, b) => b.mtimeMs - a.mtimeMs);
   log(`- 待上传：${pending.length} 个（本次最多传 ${CONFIG.maxUploadsPerRun} 个）`);
@@ -283,15 +306,23 @@ async function main() {
     const batch = pending.slice(0, CONFIG.maxUploadsPerRun);
     for (const f of batch) {
       try {
-        const r = await uploadOne(f.path, f.name, f.size, kbId, creds);
+        // 同名不同大小的文件：加时间戳后缀另存上传，保留知识库里的旧版本
+        let uploadName = f.name;
+        if (f.renameOnUpload) {
+          const p = (n) => String(n).padStart(2, "0");
+          const d = new Date();
+          const ts = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+          uploadName = f.name.replace(/\.md$/i, "") + "_" + ts + ".md";
+        }
+        const r = await uploadOne(f.path, uploadName, f.size, kbId, creds);
         if (r.ok) {
           results.success.push(f);
-          uploadedMap[f.path.toLowerCase()] = { name: f.name, size: f.size, mtimeMs: f.mtimeMs, uploadedAt: fmtDate(Date.now()), media_id: r.media_id };
-          kbNames.add(f.name);
-          console.log(`[OK] ${f.name}`);
+          uploadedMap[f.path.toLowerCase()] = { name: uploadName, size: f.size, mtimeMs: f.mtimeMs, uploadedAt: fmtDate(Date.now()), media_id: r.media_id };
+          kbNames.add(uploadName);
+          console.log(`[OK] ${f.name}${uploadName !== f.name ? " → " + uploadName : ""}`);
         } else {
           results.skipped.push({ f, reason: r.reason });
-          uploadedMap[f.path.toLowerCase()] = { name: f.name, size: f.size, mtimeMs: f.mtimeMs, uploadedAt: fmtDate(Date.now()), skipped: r.reason };
+          uploadedMap[f.path.toLowerCase()] = { name: uploadName, size: f.size, mtimeMs: f.mtimeMs, uploadedAt: fmtDate(Date.now()), skipped: r.reason };
           console.log(`[SKIP] ${f.name}: ${r.reason}`);
         }
       } catch (e) {
