@@ -1,0 +1,12 @@
+{
+  "kbName": "AI笔记一股脑",
+  "scanRoots": [
+    "C:\\Users\\你的用户名\\Desktop",
+    "C:\\Users\\你的用户名\\Documents",
+    "C:\\Users\\你的用户名\\Downloads"
+  ],
+  "looseRoots": ["c:\\users\\你的用户名\\workbuddy"],
+  "cooldownDays": 14,
+  "maxUploadsPerRun": 100,
+  "maxDepth": 7
+}

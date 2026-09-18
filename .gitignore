@@ -1,0 +1,19 @@
+# 本机运行产物（勿提交）
+state.json
+files_list.json
+*.log
+run*.log
+dryrun*.log
+
+# 本地配置（含个人目录结构）
+config.json
+
+# 生成的目录文件
+AI问答文档目录.md
+AI问答文档目录*.xlsx
+
+# 系统
+.DS_Store
+Thumbs.db
+node_modules/
+__pycache__/
