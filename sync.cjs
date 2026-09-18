@@ -217,14 +217,23 @@ async function uploadOne(filePath, fileName, fileSize, kbId, creds) {
   return { ok: true, media_id: (ak && ak.media_id) || mediaId };
 }
 
-// 同名冲突时取远端文件大小（取不到返回 null，视为同一文件跳过）
+// 同名冲突时取远端文件大小：get_media_info 不含大小，改走其文件下载 URL 的 content-length
 async function getRemoteSize(mediaId, creds) {
   try {
     const m = await imaApi("openapi/wiki/v1/get_media_info", { media_id: mediaId }, creds);
-    const size = m.file_size ?? m.size ?? (m.file_info && m.file_info.file_size);
-    if (size != null) return Number(size);
-    const match = JSON.stringify(m).match(/"(?:file_size|size)"\s*:\s*(\d+)/i);
-    return match ? Number(match[1]) : null;
+    const url = m && m.url_info && m.url_info.url;
+    if (!url) return null;
+    const headers = Object.assign({}, (m.url_info && m.url_info.headers) || {});
+    // 先 HEAD 拿 content-length；不支持再整包 GET
+    let head = await fetch(url, { method: "HEAD", headers });
+    if (!head.ok) head = await fetch(url, { headers });
+    if (!head.ok) return null;
+    let len = head.headers.get("content-length");
+    if (len == null) {
+      const buf = await head.arrayBuffer();
+      len = String(buf.byteLength);
+    }
+    return Number(len);
   } catch { return null; }
 }
 
