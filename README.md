@@ -57,9 +57,17 @@ AI 对话 ──► 总结成 md 存档 ──► 本工具自动上传 ima 知�
 
 ## 快速开始
 
-### 1. 准备 ima OpenAPI 凭证
+### 1. 安装 ima 技能并获取凭证
 
-到 [ima.qq.com/agent-interface](https://ima.qq.com/agent-interface) 申请 Client ID 和 API Key，然后：
+**① 安装 ima 技能**（供 WorkBuddy 等 AI 工作台/编码工具调用 ima 能力，非本工具必需但推荐）：
+
+- 下载地址：<https://app-dl.ima.qq.com/skills/ima-skills-1.1.10.zip>
+- 下载后解压，将技能目录放入你所用 AI 工具的技能目录（WorkBuddy 为 `~/.workbuddy/skills/`），版本号以 [agent-interface 页面](https://ima.qq.com/agent-interface) 最新提示为准
+
+**② 获取 API Key**：
+
+- 打开 <https://ima.qq.com/agent-interface>，按页面提示 **第 2 步：获取 API Key**
+- 拿到 Client ID 和 API Key 后，可直接发给你的 AI 助手（如小龙虾）完成配置，或手动存放：
 
 ```bash
 mkdir -p ~/.config/ima
